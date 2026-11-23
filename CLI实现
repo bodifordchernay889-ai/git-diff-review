@@ -1,0 +1,218 @@
+from __future__ import annotations
+
+import argparse
+from pathlib import Path
+import sys
+
+from .analyzer import analyze_with_rules
+from .benchmark import (
+    load_manifest,
+    render_benchmark_markdown,
+    run_benchmark,
+)
+from .diff import DiffFormatError, parse_diff
+from .llm import (
+    LLMReviewError,
+    config_from_args,
+    format_cost_receipt,
+    review_with_llm,
+)
+from .review import render_markdown
+
+
+def _common_llm_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--model",
+        default="gpt-4.1-mini",
+        help="LLM 模型名（默认：gpt-4.1-mini）",
+    )
+    parser.add_argument(
+        "--base-url",
+        help="OpenAI 兼容 API 根地址，也可用 OPENAI_BASE_URL",
+    )
+    parser.add_argument(
+        "--api-key",
+        help="LLM API key；建议改用 OPENAI_API_KEY，避免出现在进程参数中",
+    )
+    parser.add_argument(
+        "--max-cost-usd",
+        type=float,
+        default=0.03,
+        help="单次审查的硬成本上限，USD（默认：0.03）",
+    )
+    parser.add_argument(
+        "--max-output-tokens",
+        type=int,
+        default=1200,
+        help="单次调用的最大输出 token（默认：1200）",
+    )
+    parser.add_argument(
+        "--max-input-bytes",
+        type=int,
+        default=48_000,
+        help="送入模型的 diff 最大 UTF-8 字节数（默认：48000）",
+    )
+    parser.add_argument(
+        "--input-price-per-mtok",
+        type=float,
+        default=0.40,
+        help="模型输入价格 USD / 1M tokens（默认：0.40）",
+    )
+    parser.add_argument(
+        "--output-price-per-mtok",
+        type=float,
+        default=1.60,
+        help="模型输出价格 USD / 1M tokens（默认：1.60）",
+    )
+    parser.add_argument(
+        "--timeout",
+        type=float,
+        default=60.0,
+        help="单次 LLM 请求超时秒数（默认：60）",
+    )
+    parser.add_argument(
+        "--no-json-mode",
+        action="store_true",
+        help="不发送 response_format=json_object，供兼容端点使用",
+    )
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="diff-review",
+        description="把标准 Git diff 转成固定四节的 Markdown 审查清单。",
+    )
+    parser.add_argument("--version", action="version", version="%(prog)s 0.1.0")
+    subparsers = parser.add_subparsers(dest="command", required=True)
+
+    review = subparsers.add_parser("review", help="审查一条 diff")
+    review.add_argument(
+        "path",
+        nargs="?",
+        default="-",
+        help="diff 文件；使用 - 从 stdin 读取（默认：-）",
+    )
+    review.add_argument(
+        "--backend",
+        choices=("llm", "rules"),
+        default="llm",
+        help="审查后端（默认：llm）",
+    )
+    review.add_argument(
+        "--output",
+        default="-",
+        help="Markdown 输出文件；使用 - 写到 stdout（默认：-）",
+    )
+    _common_llm_arguments(review)
+
+    benchmark = subparsers.add_parser("benchmark", help="运行 20 条回归验收")
+    benchmark.add_argument(
+        "fixture_dir",
+        nargs="?",
+        default="tests/fixtures/regression",
+        help="包含 manifest.json 的评测目录",
+    )
+    benchmark.add_argument(
+        "--backend",
+        choices=("rules", "llm"),
+        default="rules",
+        help="评测后端（默认：rules）",
+    )
+    benchmark.add_argument(
+        "--output",
+        default="-",
+        help="Markdown 报告路径；使用 - 写到 stdout（默认：-）",
+    )
+    benchmark.add_argument(
+        "--max-total-cost-usd",
+        type=float,
+        default=0.60,
+        help="LLM 批量评测最坏成本上限，USD（默认：0.60）",
+    )
+    _common_llm_arguments(benchmark)
+    return parser
+
+
+def _read_input(path: str) -> tuple[str, Path | None]:
+    if path == "-":
+        if sys.stdin.isatty():
+            raise ValueError("stdin 是终端；请通过管道输入 diff，或提供 diff 文件路径。")
+        return sys.stdin.read(), None
+    source = Path(path)
+    try:
+        return source.read_text(encoding="utf-8", errors="surrogateescape"), source
+    except OSError as exc:
+        raise ValueError(f"无法读取 {source}: {exc}") from exc
+
+
+def _write_output(text: str, output: str, source_path: Path | None) -> None:
+    if output == "-":
+        sys.stdout.write(text)
+        if not text.endswith("\n"):
+            sys.stdout.write("\n")
+        return
+    destination = Path(output)
+    if source_path is not None:
+        try:
+            if destination.resolve() == source_path.resolve():
+                raise ValueError("--output 不能覆盖输入 diff 文件。")
+        except OSError:
+            pass
+    try:
+        destination.write_text(text, encoding="utf-8")
+    except OSError as exc:
+        raise ValueError(f"无法写入 {destination}: {exc}") from exc
+
+
+def _run_review(args: argparse.Namespace) -> int:
+    text, source_path = _read_input(args.path)
+    parsed = parse_diff(text)
+    if args.backend == "rules":
+        result = analyze_with_rules(parsed)
+    else:
+        config = config_from_args(args)
+        reviewed = review_with_llm(parsed, config)
+        result = reviewed.result
+        print(
+            format_cost_receipt(reviewed.cost, config.max_cost_usd),
+            file=sys.stderr,
+        )
+    _write_output(render_markdown(result, parsed), args.output, source_path)
+    return 0
+
+
+def _run_benchmark(args: argparse.Namespace) -> int:
+    root = Path(args.fixture_dir)
+    name, _ = load_manifest(root)
+    config = None
+    if args.backend == "llm":
+        config = config_from_args(args)
+    report = run_benchmark(
+        root,
+        backend=args.backend,
+        llm_config=config,
+        max_total_cost_usd=args.max_total_cost_usd,
+    )
+    markdown = render_benchmark_markdown(report, name)
+    _write_output(markdown, args.output, None)
+    print(
+        f"验收{'通过' if report.passed else '未通过'}："
+        f"命中 {report.hits}/{report.bugs}，"
+        f"误报 {report.false_positives}/{report.clean}。",
+        file=sys.stderr,
+    )
+    return 0 if report.passed else 1
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    try:
+        if args.command == "review":
+            return _run_review(args)
+        if args.command == "benchmark":
+            return _run_benchmark(args)
+    except (ValueError, DiffFormatError, LLMReviewError) as exc:
+        print(f"diff-review: {exc}", file=sys.stderr)
+        return 2
+    return 2
