@@ -1,0 +1,145 @@
+{
+  "name": "20 条去敏历史缺陷模式回归集",
+  "cases": [
+    {
+      "id": "01_sql_injection",
+      "label": "bug",
+      "diff": "case_01_sql_injection.diff",
+      "expected_categories": ["sql_injection"],
+      "description": "用户输入经 f-string 拼入 SQL"
+    },
+    {
+      "id": "02_hardcoded_secret",
+      "label": "bug",
+      "diff": "case_02_hardcoded_secret.diff",
+      "expected_categories": ["hardcoded_secret"],
+      "description": "生产客户端密钥被硬编码"
+    },
+    {
+      "id": "03_command_injection",
+      "label": "bug",
+      "diff": "case_03_command_injection.diff",
+      "expected_categories": ["command_injection"],
+      "description": "文件参数进入 shell 命令"
+    },
+    {
+      "id": "04_eval_exec",
+      "label": "bug",
+      "diff": "case_04_eval_exec.diff",
+      "expected_categories": ["eval_exec"],
+      "description": "配置值直接交给 eval"
+    },
+    {
+      "id": "05_mutable_default",
+      "label": "bug",
+      "diff": "case_05_mutable_default.diff",
+      "expected_categories": ["mutable_default"],
+      "description": "列表默认参数跨调用共享"
+    },
+    {
+      "id": "06_unsafe_deserialization",
+      "label": "bug",
+      "diff": "case_06_unsafe_deserialization.diff",
+      "expected_categories": ["unsafe_deserialization"],
+      "description": "外部缓存载荷交给 pickle"
+    },
+    {
+      "id": "07_tls_disabled",
+      "label": "bug",
+      "diff": "case_07_tls_disabled.diff",
+      "expected_categories": ["tls_disabled"],
+      "description": "生产 HTTP 客户端关闭证书校验"
+    },
+    {
+      "id": "08_authorization_removed",
+      "label": "bug",
+      "diff": "case_08_authorization_removed.diff",
+      "expected_categories": ["authorization_removed"],
+      "description": "管理接口删除了登录保护"
+    },
+    {
+      "id": "09_sensitive_logging",
+      "label": "bug",
+      "diff": "case_09_sensitive_logging.diff",
+      "expected_categories": ["sensitive_logging"],
+      "description": "登录失败日志直接记录口令"
+    },
+    {
+      "id": "10_path_traversal",
+      "label": "bug",
+      "diff": "case_10_path_traversal.diff",
+      "expected_categories": ["path_traversal"],
+      "description": "下载接口把查询参数直接拼入路径"
+    },
+    {
+      "id": "11_parameterized_sql",
+      "label": "clean",
+      "diff": "case_11_parameterized_sql.diff",
+      "expected_categories": [],
+      "description": "查询继续使用参数绑定"
+    },
+    {
+      "id": "12_env_secret",
+      "label": "clean",
+      "diff": "case_12_env_secret.diff",
+      "expected_categories": [],
+      "description": "凭据从环境读取并校验缺失"
+    },
+    {
+      "id": "13_safe_subprocess",
+      "label": "clean",
+      "diff": "case_13_safe_subprocess.diff",
+      "expected_categories": [],
+      "description": "subprocess 使用参数列表且未启用 shell"
+    },
+    {
+      "id": "14_json_deserialization",
+      "label": "clean",
+      "diff": "case_14_json_deserialization.diff",
+      "expected_categories": [],
+      "description": "使用 JSON 反序列化并校验对象类型"
+    },
+    {
+      "id": "15_tls_enabled",
+      "label": "clean",
+      "diff": "case_15_tls_enabled.diff",
+      "expected_categories": [],
+      "description": "显式启用证书校验"
+    },
+    {
+      "id": "16_specific_exception",
+      "label": "clean",
+      "diff": "case_16_specific_exception.diff",
+      "expected_categories": [],
+      "description": "只捕获明确的可恢复异常"
+    },
+    {
+      "id": "17_context_manager",
+      "label": "clean",
+      "diff": "case_17_context_manager.diff",
+      "expected_categories": [],
+      "description": "读取文件使用上下文管理器"
+    },
+    {
+      "id": "18_authorization_added",
+      "label": "clean",
+      "diff": "case_18_authorization_added.diff",
+      "expected_categories": [],
+      "description": "新增接口带权限检查"
+    },
+    {
+      "id": "19_redacted_logging",
+      "label": "clean",
+      "diff": "case_19_redacted_logging.diff",
+      "expected_categories": [],
+      "description": "诊断日志只记录脱敏后的令牌指纹"
+    },
+    {
+      "id": "20_docs_only",
+      "label": "clean",
+      "diff": "case_20_docs_only.diff",
+      "expected_categories": [],
+      "description": "仅更新说明文档"
+    }
+  ]
+}
